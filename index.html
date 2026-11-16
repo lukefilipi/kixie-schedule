@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>KIXIE | Weekly Availability</title>
+<style>
+  :root { color-scheme:dark; --ink:#e5e7eb; --muted:#9ca3af; --line:#2d3748; --bg:#111827; --panel:#1a2230; --brand:#0b0f17; --ok:#22c55e; --okbg:#0f2e1c; --bad:#f87171; --badbg:#3a1414; --warn:#fbbf24; --warnbg:#33270a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--brand); color:#fff; padding:14px 16px; }
+  header h1 { margin:0; font-size:18px; } header div { opacity:.75; font-size:13px; }
+  main { max-width:720px; margin:0 auto; padding:16px 16px 96px; }
+  .day { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+  .day h3 { margin:0 0 8px; font-size:15px; }
+  .slots { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
+  @media (min-width:600px) { .slots { grid-template-columns:repeat(4, 1fr); } }
+  .slot { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 8px; text-align:left; cursor:pointer; }
+  .slot small { display:block; color:var(--muted); font-size:12px; }
+  .slot.on { background:var(--okbg); border-color:var(--ok); }
+  .slot.on::after { content:' ✓'; color:var(--ok); font-weight:700; }
+  .slot:disabled { opacity:.6; cursor:default; }
+  .msg { padding:10px 12px; border-radius:8px; margin-bottom:12px; display:none; }
+  .msg.show { display:block; } .msg.ok { background:var(--okbg); } .msg.bad { background:var(--badbg); } .msg.warn { background:var(--warnbg); }
+  .bar { position:fixed; left:0; right:0; bottom:0; background:var(--brand); border-top:1px solid var(--line); padding:12px 16px; display:flex; align-items:center; gap:12px; justify-content:center; }
+  .bar span { color:var(--muted); font-size:14px; }
+  button.save { font:inherit; background:#15803d; color:#fff; border:0; padding:10px 18px; border-radius:8px; font-weight:600; cursor:pointer; }
+  button.save:disabled { opacity:.5; }
+  .muted { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header><h1>KIXIE | Pick your calling blocks</h1><div id="sub">Loading…</div></header>
+<main>
+  <div id="msg" class="msg"></div>
+  <p class="muted" id="intro"></p>
+  <div id="days"></div>
+</main>
+<div class="bar"><span id="count">0 blocks picked</span><button class="save" id="save" disabled>Save availability</button></div>
+<script src="api.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let DATA = null, picked = new Set();
+function say(t, k) { const m = $('msg'); m.textContent = t; m.className = 'msg show ' + (k || 'ok'); }
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function count() { $('count').textContent = picked.size + ' block' + (picked.size === 1 ? '' : 's') + ' picked (' + picked.size * 2 + 'h)'; }
+function render() {
+  const d = DATA;
+  $('sub').textContent = d.caller + ' · week of ' + d.week + ' · times in your time zone (' + d.timezone + ')';
+  $('intro').textContent = d.editable
+    ? 'Tap every 2-hour block you could work, then press Save. Pick as many as you can; the schedule gives everyone a fair share (about ' + d.targetHours + ' hours each).'
+    : 'This week has been approved, so availability is locked. Your sessions are on the KIXIE calendar.';
+  const byDay = {};
+  d.slots.forEach(s => (byDay[s.date] = byDay[s.date] || []).push(s));
+  $('days').innerHTML = Object.keys(byDay).map(date => {
+    const label = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric', timeZone:'UTC' });
+    return '<div class="day"><h3>' + label + '</h3><div class="slots">' + byDay[date].map(s =>
+      '<button class="slot' + (picked.has(s.id) ? ' on' : '') + '" data-id="' + esc(s.id) + '"' + (d.editable ? '' : ' disabled') + '>' +
+      esc(s.localStart.replace(/^\w+ \w+ \d+, /, '')) + ' – ' + esc(s.localEnd) + '<small>' + esc(s.etStart) + '–' + esc(s.etEnd) + ' ET</small></button>').join('') +
+      '</div></div>';
+  }).join('');
+  document.querySelectorAll('.slot').forEach(b => b.onclick = () => {
+    const id = b.dataset.id;
+    picked.has(id) ? picked.delete(id) : picked.add(id);
+    b.classList.toggle('on'); count(); $('save').disabled = false;
+  });
+  $('save').disabled = true; $('save').style.display = d.editable ? '' : 'none';
+  count();
+}
+function load() {
+  if (!KX.t) { $('sub').textContent = ''; return say('This link is missing its code. Open the link from your email again.', 'bad'); }
+  kxCall('getAvailabilityCalendar', [KX.t]).then(d => { DATA = d; picked = new Set(d.selected); render(); },
+    e => { $('sub').textContent = ''; say(e.message, 'bad'); });
+}
+$('save').onclick = () => {
+  $('save').disabled = true; say('Saving…', 'warn');
+  kxCall('saveAvailabilityCalendar', [KX.t, DATA.week, Array.from(picked)])
+    .then(r => say('Saved ✓ ' + r.savedCount + ' blocks for the week of ' + r.week + '. You can change them until the schedule is approved.', 'ok'),
+      e => { $('save').disabled = false; say(e.message, 'bad'); });
+};
+load();
+</script>
+</body>
+</html>
