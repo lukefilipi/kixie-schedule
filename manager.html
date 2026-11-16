@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>KIXIE | Manager</title>
+<style>
+  :root { color-scheme:dark; --ink:#e5e7eb; --muted:#9ca3af; --line:#2d3748; --ok:#22c55e; --okbg:#0f2e1c; --warn:#fbbf24; --warnbg:#33270a; --bad:#f87171; --badbg:#3a1414; --brand:#0b0f17; --bg:#111827; --panel:#1a2230; --head:#222c3c; --day:#161e2b; --pill:#273449; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--brand); color:#fff; padding:14px 16px; }
+  header h1 { margin:0; font-size:18px; }
+  header .sub { opacity:.75; font-size:13px; }
+  main { max-width:980px; margin:0 auto; padding:16px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--ink); padding:8px 12px; border-radius:8px; cursor:pointer; }
+  button.primary { background:#15803d; color:#fff; border-color:var(--ok); font-weight:600; }
+  button:disabled { opacity:.5; cursor:default; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:var(--pill); margin:1px 2px; }
+  .pill.ok { background:var(--okbg); color:var(--ok); } .pill.warn { background:var(--warnbg); color:var(--warn); } .pill.bad { background:var(--badbg); color:var(--bad); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; margin-bottom:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card b { font-size:20px; display:block; }
+  .msg { padding:10px 12px; border-radius:8px; margin-bottom:12px; display:none; white-space:pre-wrap; }
+  .msg.show { display:block; } .msg.ok { background:var(--okbg); } .msg.bad { background:var(--badbg); } .msg.warn { background:var(--warnbg); }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { background:var(--head); font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  tr.day td { background:var(--day); font-weight:600; }
+  select { font:inherit; padding:5px 6px; border-radius:6px; border:1px solid var(--line); min-width:120px; background:var(--bg); color:var(--ink); }
+  td.small { color:var(--muted); font-size:12px; }
+  @media (max-width:640px){ .hide-sm { display:none; } th, td { padding:6px; } }
+</style>
+</head>
+<body>
+<header><h1>KIXIE | Manager</h1><div class="sub" id="sub">Loading…</div></header>
+<main>
+  <div class="bar">
+    <button id="prev">◀ Prev week</button>
+    <button id="next">Next week ▶</button>
+    <span style="flex:1"></span>
+    <button id="gen">Regenerate fair draft</button>
+    <button id="approve" class="primary">Approve schedule</button>
+  </div>
+  <div id="msg" class="msg"></div>
+  <div id="trello" class="card" style="display:none;margin-bottom:12px">
+    <b style="font-size:15px">Connect Trello</b>
+    <div class="small" style="color:var(--muted);margin:4px 0 8px">Paste your Trello API key and token. Approved sessions then go to the "KIXIE | Call Sessions" board, and move to Done or Missed when logged.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px">
+      <input id="tkey" type="password" autocomplete="off" placeholder="API key" style="font:inherit;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)">
+      <input id="ttok" type="password" autocomplete="off" placeholder="Token" style="font:inherit;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)">
+      <button id="tgo" class="primary">Connect</button>
+    </div>
+  </div>
+  <div class="cards" id="cards"></div>
+  <table>
+    <thead><tr><th>Time (ET)</th><th class="hide-sm">Your time</th><th>Available</th><th>Assigned</th><th class="hide-sm">Status</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="small" style="color:var(--muted)">Change any dropdown to reassign a block, then press Approve. Only callers who marked a block available can be chosen. Nothing is published until you approve.</p>
+</main>
+<script src="api.js"></script>
+<script>
+const TOKEN = KX.t || '';
+let WEEK = KX.w || '';
+let DATA = null;
+const $ = id => document.getElementById(id);
+
+function say(text, kind) { const m = $('msg'); m.textContent = text; m.className = 'msg show ' + (kind || 'ok'); }
+function busy(on) { ['gen','approve','prev','next'].forEach(id => $(id).disabled = on); }
+function fail(e) { busy(false); say(e && e.message ? e.message : String(e), 'bad'); }
+
+function load(week) {
+  busy(true);
+  google.script.run.withSuccessHandler(d => { DATA = d; WEEK = d.week; render(); busy(false); })
+    .withFailureHandler(fail).ksManagerView(TOKEN, week || WEEK);
+}
+
+function currentAssignments() {
+  const a = {};
+  document.querySelectorAll('select[data-id]').forEach(s => { a[s.dataset.id] = s.value; });
+  return a;
+}
+
+function render() {
+  const d = DATA, st = d.status;
+  const approved = /^approved$/i.test(st.decision);
+  $('sub').textContent = 'Week of ' + d.week + ' · ' + (st.version ? 'Draft ' + st.version : 'No draft yet') +
+    ' · ' + (approved ? 'APPROVED' : (st.decision || 'Pending')) + ' · ' + (st.publication || 'NOT PUBLISHED') +
+    (d.publishEnabled ? '' : ' · publishing off');
+  $('trello').style.display = d.trelloConnected ? 'none' : 'block';
+  const tb = $('rows'); tb.innerHTML = '';
+  let lastDate = '';
+  d.sessions.forEach(s => {
+    if (s.date !== lastDate) {
+      lastDate = s.date;
+      const tr = document.createElement('tr'); tr.className = 'day';
+      tr.innerHTML = '<td colspan="5">' + new Date(s.date + 'T12:00:00Z').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric', timeZone:'UTC'}) + '</td>';
+      tb.appendChild(tr);
+    }
+    const current = s.approved && !/cancel/i.test(s.approved.state) ? s.approved.caller : s.draft;
+    const tr = document.createElement('tr');
+    const opts = ['<option value="">— nobody —</option>'].concat(d.callers.map(c => {
+      const ok = s.available.indexOf(c.name) >= 0;
+      return '<option value="' + c.name + '"' + (c.name === current ? ' selected' : '') + (ok ? '' : ' disabled') + '>' + c.name + (ok ? '' : ' (not available)') + '</option>';
+    }));
+    const statusPill = s.approved ? '<span class="pill ' + (/^published$/i.test(s.approved.state) ? 'ok' : /fail|partial/i.test(s.approved.state) ? 'bad' : 'warn') + '">' + s.approved.state + '</span>' +
+      (s.approved.attendance && s.approved.attendance !== 'Scheduled' ? ' <span class="pill">' + s.approved.attendance + '</span>' : '')
+      : (current ? '<span class="pill">draft</span>' : (s.available.length ? '<span class="pill warn">open</span>' : ''));
+    tr.innerHTML = '<td>' + s.et + '</td><td class="small hide-sm">' + s.local.replace(/^\w+ \w+ \d+, /, '') + '</td>' +
+      '<td>' + (s.available.map(n => '<span class="pill">' + n + '</span>').join('') || '<span class="small">nobody</span>') + '</td>' +
+      '<td><select data-id="' + s.id + '">' + opts.join('') + '</select></td><td class="hide-sm">' + statusPill + '</td>';
+    tb.appendChild(tr);
+  });
+  document.querySelectorAll('select[data-id]').forEach(s => s.addEventListener('change', summarise));
+  summarise();
+}
+
+function summarise() {
+  const a = currentAssignments(), hours = {};
+  Object.keys(a).forEach(k => { if (a[k]) hours[a[k]] = (hours[a[k]] || 0) + 2; });
+  $('cards').innerHTML = DATA.callers.map(c => {
+    const h = hours[c.name] || 0;
+    const cls = h === c.targetHours ? 'ok' : h < c.targetHours ? 'warn' : 'bad';
+    return '<div class="card">' + c.name + '<b>' + h + 'h <span class="pill ' + cls + '">target ' + c.targetHours + 'h</span></b>' +
+      '<span class="small">' + (c.submitted ? 'availability submitted' : '<span class="pill bad">no availability yet</span>') + '</span></div>';
+  }).join('');
+}
+
+$('prev').onclick = () => load(DATA.prevWeek);
+$('next').onclick = () => load(DATA.nextWeek);
+$('gen').onclick = () => {
+  if (/^approved$/i.test(DATA.status.decision)) return say('This week is already approved. Reassign with the dropdowns and press Approve again.', 'warn');
+  busy(true); say('Building the fairest schedule from everyone\'s latest availability…', 'warn');
+  google.script.run.withSuccessHandler(r => {
+    say('Draft ' + r.version + ' ready.' + (r.flags.length ? '\n' + r.flags.join('\n') : ' Everyone got full hours.'), r.flags.length ? 'warn' : 'ok');
+    load(WEEK);
+  }).withFailureHandler(fail).ksManagerGenerate(TOKEN, WEEK);
+};
+$('approve').onclick = () => {
+  const a = currentAssignments();
+  const n = Object.values(a).filter(Boolean).length;
+  if (!confirm('Approve ' + n + ' sessions for the week of ' + WEEK + '?' + (DATA.publishEnabled ? '\n\nThis will put them on the team calendar and email each caller.' : ''))) return;
+  busy(true); say('Validating and approving…', 'warn');
+  google.script.run.withSuccessHandler(r => {
+    if (!r.ok) { busy(false); return say('Not approved. Fix these first:\n• ' + r.errors.join('\n• '), 'bad'); }
+    const p = r.published;
+    say('Approved.' + (p ? ' Calendar: ' + p.created + ' created, ' + p.updated + ' updated, ' + p.cancelled + ' removed.' +
+      (p.emailed.length ? ' Emailed: ' + p.emailed.join(', ') + '.' : '') + (p.errors.length ? '\nProblems:\n• ' + p.errors.join('\n• ') : '')
+      : ' Publishing is off, so nothing was sent to the calendar or callers yet.'), p && p.errors.length ? 'warn' : 'ok');
+    load(WEEK);
+  }).withFailureHandler(fail).ksManagerApprove(TOKEN, WEEK, DATA.status.version, a);
+};
+$('tgo').onclick = () => {
+  const k = $('tkey').value.trim(), t = $('ttok').value.trim();
+  if (!k || !t) return say('Paste both the API key and the token.', 'bad');
+  $('tgo').disabled = true; say('Checking with Trello…', 'warn');
+  google.script.run.withSuccessHandler(r => {
+    $('tkey').value = ''; $('ttok').value = ''; $('tgo').disabled = false;
+    say('Trello connected to ' + r.board + '.', 'ok'); load(WEEK);
+  }).withFailureHandler(e => { $('tgo').disabled = false; fail(e); }).ksTrelloConnect(TOKEN, k, t);
+};
+load(WEEK);
+</script>
+</body>
+</html>
