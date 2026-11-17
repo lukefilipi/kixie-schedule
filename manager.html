@@ -58,7 +58,7 @@
     <thead><tr><th>Time (ET)</th><th class="hide-sm">Your time</th><th>Available</th><th>Assigned</th><th class="hide-sm">Status</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="small" style="color:var(--muted)">Change any dropdown to reassign a block, then press Approve. Only callers who marked a block available can be chosen. Nothing is published until you approve.</p>
+  <p class="small" style="color:var(--muted)">Change any dropdown to reassign a block, then press Approve. You can pick anyone, even for a block they did not mark. Nothing is published until you approve.</p>
 </main>
 <script src="api.js"></script>
 <script>
@@ -103,7 +103,7 @@ function render() {
     const tr = document.createElement('tr');
     const opts = ['<option value="">— nobody —</option>'].concat(d.callers.map(c => {
       const ok = s.available.indexOf(c.name) >= 0;
-      return '<option value="' + c.name + '"' + (c.name === current ? ' selected' : '') + (ok ? '' : ' disabled') + '>' + c.name + (ok ? '' : ' (not available)') + '</option>';
+      return '<option value="' + c.name + '"' + (c.name === current ? ' selected' : '') + '>' + c.name + (ok ? '' : ' (not marked)') + '</option>';
     }));
     const statusPill = s.approved ? '<span class="pill ' + (/^published$/i.test(s.approved.state) ? 'ok' : /fail|partial/i.test(s.approved.state) ? 'bad' : 'warn') + '">' + s.approved.state + '</span>' +
       (s.approved.attendance && s.approved.attendance !== 'Scheduled' ? ' <span class="pill">' + s.approved.attendance + '</span>' : '')
