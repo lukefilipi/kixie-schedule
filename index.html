@@ -15,7 +15,8 @@
   .day { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
   .day h3 { margin:0 0 8px; font-size:15px; }
   .slots { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
-  @media (min-width:600px) { .slots { grid-template-columns:repeat(4, 1fr); } }
+  @media (min-width:600px) { .slots { grid-template-columns:repeat(5, 1fr); } }
+  .day h3 button { font:inherit; font-size:12px; font-weight:400; float:right; background:none; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:2px 8px; cursor:pointer; }
   .slot { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 8px; text-align:left; cursor:pointer; }
   .slot small { display:block; color:var(--muted); font-size:12px; }
   .slot.on { background:var(--okbg); border-color:var(--ok); }
@@ -31,35 +32,44 @@
 </style>
 </head>
 <body>
-<header><h1>KIXIE | Pick your calling blocks</h1><div id="sub">Loading…</div></header>
+<header><h1>KIXIE | Pick your calling hours</h1><div id="sub">Loading…</div></header>
 <main>
   <div id="msg" class="msg"></div>
   <p class="muted" id="intro"></p>
   <div id="days"></div>
 </main>
-<div class="bar"><span id="count">0 blocks picked</span><button class="save" id="save" disabled>Save availability</button></div>
+<div class="bar"><span id="count">0h picked</span><button class="save" id="save" disabled>Save availability</button></div>
 <script src="api.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let DATA = null, picked = new Set();
 function say(t, k) { const m = $('msg'); m.textContent = t; m.className = 'msg show ' + (k || 'ok'); }
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function count() { $('count').textContent = picked.size + ' block' + (picked.size === 1 ? '' : 's') + ' picked (' + picked.size * 2 + 'h)'; }
+const LEN = () => (DATA && DATA.slotHours) || 2;
+function h12(hh) { const h = parseInt(hh, 10); return (h % 12 || 12) + (h < 12 ? ' AM' : ' PM'); }
+function count() { $('count').textContent = picked.size * LEN() + 'h picked'; }
 function render() {
   const d = DATA;
   $('sub').textContent = d.caller + ' · week of ' + d.week + ' · times in your time zone (' + d.timezone + ')';
   $('intro').textContent = d.editable
-    ? 'Tap every 2-hour block you could work, then press Save. Pick as many as you can; the schedule gives everyone a fair share (about ' + d.targetHours + ' hours each).'
+    ? (LEN() === 1
+      ? 'Tap every hour you could work, then press Save. Pick as many as you can. The schedule keeps back-to-back hours together, so you will usually get 2 hours in a row instead of switching every hour (about ' + d.targetHours + ' hours each per week).'
+      : 'Tap every 2-hour block you could work, then press Save. Pick as many as you can; the schedule gives everyone a fair share (about ' + d.targetHours + ' hours each).')
     : 'This week has been approved, so availability is locked. Your sessions are on the KIXIE calendar.';
   const byDay = {};
   d.slots.forEach(s => (byDay[s.date] = byDay[s.date] || []).push(s));
   $('days').innerHTML = Object.keys(byDay).map(date => {
     const label = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric', timeZone:'UTC' });
-    return '<div class="day"><h3>' + label + '</h3><div class="slots">' + byDay[date].map(s =>
+    return '<div class="day"><h3>' + label + (d.editable ? '<button data-day="' + esc(date) + '">All / none</button>' : '') + '</h3><div class="slots">' + byDay[date].map(s =>
       '<button class="slot' + (picked.has(s.id) ? ' on' : '') + '" data-id="' + esc(s.id) + '"' + (d.editable ? '' : ' disabled') + '>' +
-      esc(s.localStart.replace(/^\w+ \w+ \d+, /, '')) + ' – ' + esc(s.localEnd) + '<small>' + esc(s.etStart) + '–' + esc(s.etEnd) + ' ET</small></button>').join('') +
+      esc(s.localStart.replace(/^\w+ \w+ \d+, /, '').replace(':00', '')) + ' – ' + esc(s.localEnd.replace(':00', '')) + '<small>' + h12(s.etStart) + '–' + h12(s.etEnd) + ' ET</small></button>').join('') +
       '</div></div>';
   }).join('');
+  document.querySelectorAll('h3 button[data-day]').forEach(b => b.onclick = () => {
+    const ids = byDay[b.dataset.day].map(s => s.id), all = ids.every(id => picked.has(id));
+    ids.forEach(id => all ? picked.delete(id) : picked.add(id));
+    render(); $('save').disabled = false;
+  });
   document.querySelectorAll('.slot').forEach(b => b.onclick = () => {
     const id = b.dataset.id;
     picked.has(id) ? picked.delete(id) : picked.add(id);
@@ -76,7 +86,7 @@ function load() {
 $('save').onclick = () => {
   $('save').disabled = true; say('Saving…', 'warn');
   kxCall('saveAvailabilityCalendar', [KX.t, DATA.week, Array.from(picked)])
-    .then(r => say('Saved ✓ ' + r.savedCount + ' blocks for the week of ' + r.week + '. You can change them until the schedule is approved.', 'ok'),
+    .then(r => say('Saved ✓ ' + r.savedCount * LEN() + ' hours for the week of ' + r.week + '. You can change them until the schedule is approved.', 'ok'),
       e => { $('save').disabled = false; say(e.message, 'bad'); });
 };
 load();
