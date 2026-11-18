@@ -55,10 +55,10 @@
   </div>
   <div class="cards" id="cards"></div>
   <table>
-    <thead><tr><th>Time (ET)</th><th class="hide-sm">Your time</th><th>Available</th><th>Assigned</th><th class="hide-sm">Status</th></tr></thead>
+    <thead><tr><th>Eastern (ET)</th><th class="hide-sm">Pacific (PT, Luke)</th><th>Marked available</th><th>Assigned</th><th class="hide-sm">Status</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="small" style="color:var(--muted)">Change any dropdown to reassign a block, then press Approve. You can pick anyone, even for a block they did not mark. Nothing is published until you approve.</p>
+  <p class="small" style="color:var(--muted)">Each block is 2 hours. Bold times are Eastern. Blocks that would overlap a booked block are hidden, so nothing can double-book Kixie. Change a dropdown to reassign (you can pick anyone), then press Approve. Nothing is published until you approve.</p>
 </main>
 <script src="api.js"></script>
 <script>
@@ -83,35 +83,47 @@ function currentAssignments() {
   return a;
 }
 
+function fmtH(h) { const ap = h >= 12 ? 'PM' : 'AM', x = h % 12 || 12; return x + ' ' + ap; }
+function etLabel(s) { const h = parseInt(s.et, 10); return fmtH(h) + ' – ' + fmtH(h + 2); }
+function ptLabel(s) { return s.local.replace(/^\w+ \w+ \d+, /, '').replace(/:00/g, '').replace(' - ', ' – '); }
+
 function render() {
   const d = DATA, st = d.status;
   const approved = /^approved$/i.test(st.decision);
   $('sub').textContent = 'Week of ' + d.week + ' · ' + (st.version ? 'Draft ' + st.version : 'No draft yet') +
     ' · ' + (approved ? 'APPROVED' : (st.decision || 'Pending')) + ' · ' + (st.publication || 'NOT PUBLISHED') +
     (d.publishEnabled ? '' : ' · publishing off');
-  $('trello').style.display = d.trelloConnected ? 'none' : 'block';
+  $('trello').style.display = 'none';
   const tb = $('rows'); tb.innerHTML = '';
-  let lastDate = '';
-  d.sessions.forEach(s => {
-    if (s.date !== lastDate) {
-      lastDate = s.date;
-      const tr = document.createElement('tr'); tr.className = 'day';
-      tr.innerHTML = '<td colspan="5">' + new Date(s.date + 'T12:00:00Z').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric', timeZone:'UTC'}) + '</td>';
-      tb.appendChild(tr);
-    }
-    const current = s.approved && !/cancel/i.test(s.approved.state) ? s.approved.caller : s.draft;
-    const tr = document.createElement('tr');
-    const opts = ['<option value="">— nobody —</option>'].concat(d.callers.map(c => {
-      const ok = s.available.indexOf(c.name) >= 0;
-      return '<option value="' + c.name + '"' + (c.name === current ? ' selected' : '') + '>' + c.name + (ok ? '' : ' (not marked)') + '</option>';
-    }));
-    const statusPill = s.approved ? '<span class="pill ' + (/^published$/i.test(s.approved.state) ? 'ok' : /fail|partial/i.test(s.approved.state) ? 'bad' : 'warn') + '">' + s.approved.state + '</span>' +
-      (s.approved.attendance && s.approved.attendance !== 'Scheduled' ? ' <span class="pill">' + s.approved.attendance + '</span>' : '')
-      : (current ? '<span class="pill">draft</span>' : (s.available.length ? '<span class="pill warn">open</span>' : ''));
-    tr.innerHTML = '<td>' + s.et + '</td><td class="small hide-sm">' + s.local.replace(/^\w+ \w+ \d+, /, '') + '</td>' +
-      '<td>' + (s.available.map(n => '<span class="pill">' + n + '</span>').join('') || '<span class="small">nobody</span>') + '</td>' +
-      '<td><select data-id="' + s.id + '">' + opts.join('') + '</select></td><td class="hide-sm">' + statusPill + '</td>';
+  const live = s => s.approved && !/cancel/i.test(s.approved.state) ? s.approved.caller : (s.approved ? '' : s.draft);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const byDay = {};
+  d.sessions.forEach(s => (byDay[s.date] = byDay[s.date] || []).push(s));
+  Object.keys(byDay).sort().forEach(date => {
+    // Show every booked block, then only empty blocks that don't overlap anything shown. No overlaps on screen.
+    const all = byDay[date].map(s => Object.assign({ h: parseInt(s.et, 10), who: live(s) }, s));
+    const shown = all.filter(s => s.who);
+    all.filter(s => !s.who).sort((a, b) => a.h - b.h).forEach(s => {
+      if (!shown.some(o => Math.abs(o.h - s.h) < 2)) shown.push(s);
+    });
+    shown.sort((a, b) => a.h - b.h);
+    const past = date < today;
+    const tr = document.createElement('tr'); tr.className = 'day';
+    tr.innerHTML = '<td colspan="5">' + new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric', timeZone:'UTC'}) + (past ? ' <span class="small">(past)</span>' : '') + '</td>';
     tb.appendChild(tr);
+    shown.forEach(s => {
+      const row = document.createElement('tr');
+      if (past) row.style.opacity = '.55';
+      const opts = ['<option value="">— nobody —</option>'].concat(d.callers.map(c =>
+        '<option value="' + c.name + '"' + (c.name === s.who ? ' selected' : '') + '>' + c.name + '</option>'));
+      const pub = s.approved && !/cancel/i.test(s.approved.state);
+      const statusPill = pub ? '<span class="pill ' + (/^published$/i.test(s.approved.state) ? 'ok' : /fail|partial/i.test(s.approved.state) ? 'bad' : 'warn') + '">' + s.approved.state + '</span>'
+        : (s.who ? '<span class="pill">draft</span>' : '');
+      row.innerHTML = '<td><b>' + etLabel(s) + '</b></td><td class="small hide-sm">' + ptLabel(s) + '</td>' +
+        '<td>' + (s.available.map(n => '<span class="pill">' + n + '</span>').join('') || '<span class="small">—</span>') + '</td>' +
+        '<td><select data-id="' + s.id + '">' + opts.join('') + '</select></td><td class="hide-sm">' + statusPill + '</td>';
+      tb.appendChild(row);
+    });
   });
   document.querySelectorAll('select[data-id]').forEach(s => s.addEventListener('change', summarise));
   summarise();
