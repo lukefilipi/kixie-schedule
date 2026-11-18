@@ -58,7 +58,7 @@
     <thead><tr><th>Eastern (ET)</th><th class="hide-sm">Pacific (PT, Luke)</th><th>Marked available</th><th>Assigned</th><th class="hide-sm">Status</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="small" style="color:var(--muted)">Each block is 2 hours. Bold times are Eastern. Blocks that would overlap a booked block are hidden, so nothing can double-book Kixie. Change a dropdown to reassign (you can pick anyone), then press Approve. Nothing is published until you approve.</p>
+  <p class="small" id="help" style="color:var(--muted)"></p>
 </main>
 <script src="api.js"></script>
 <script>
@@ -83,8 +83,10 @@ function currentAssignments() {
   return a;
 }
 
+const LEN = () => (DATA && DATA.slotHours) || 2;
+const COLORS = ['#3b82f6', '#f59e0b', '#ec4899', '#10b981', '#a78bfa'];
 function fmtH(h) { const ap = h >= 12 ? 'PM' : 'AM', x = h % 12 || 12; return x + ' ' + ap; }
-function etLabel(s) { const h = parseInt(s.et, 10); return fmtH(h) + ' – ' + fmtH(h + 2); }
+function etLabel(s) { const h = parseInt(s.et, 10); return fmtH(h) + ' – ' + fmtH(h + LEN()); }
 function ptLabel(s) { return s.local.replace(/^\w+ \w+ \d+, /, '').replace(/:00/g, '').replace(' - ', ' – '); }
 
 function render() {
@@ -94,6 +96,10 @@ function render() {
     ' · ' + (approved ? 'APPROVED' : (st.decision || 'Pending')) + ' · ' + (st.publication || 'NOT PUBLISHED') +
     (d.publishEnabled ? '' : ' · publishing off');
   $('trello').style.display = 'none';
+  $('help').textContent = (LEN() === 1
+    ? 'Each row is 1 hour, 10 AM to 8 PM Eastern. Regenerate fair draft keeps each caller\'s hours back to back (usually 2 in a row). The colored bar shows who has Kixie.'
+    : 'Each row is a 2-hour block. Blocks that would overlap a booked block are hidden, so nothing can double-book Kixie.') +
+    ' Bold times are Eastern. Change a dropdown to reassign (you can pick anyone), then press Approve. Nothing is published until you approve.';
   const tb = $('rows'); tb.innerHTML = '';
   const live = s => s.approved && !/cancel/i.test(s.approved.state) ? s.approved.caller : (s.approved ? '' : s.draft);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -104,7 +110,7 @@ function render() {
     const all = byDay[date].map(s => Object.assign({ h: parseInt(s.et, 10), who: live(s) }, s));
     const shown = all.filter(s => s.who);
     all.filter(s => !s.who).sort((a, b) => a.h - b.h).forEach(s => {
-      if (!shown.some(o => Math.abs(o.h - s.h) < 2)) shown.push(s);
+      if (!shown.some(o => Math.abs(o.h - s.h) < LEN())) shown.push(s);
     });
     shown.sort((a, b) => a.h - b.h);
     const past = date < today;
@@ -131,7 +137,11 @@ function render() {
 
 function summarise() {
   const a = currentAssignments(), hours = {};
-  Object.keys(a).forEach(k => { if (a[k]) hours[a[k]] = (hours[a[k]] || 0) + 2; });
+  Object.keys(a).forEach(k => { if (a[k]) hours[a[k]] = (hours[a[k]] || 0) + LEN(); });
+  document.querySelectorAll('select[data-id]').forEach(s => {
+    const i = DATA.callers.findIndex(c => c.name === s.value);
+    s.closest('tr').style.boxShadow = i >= 0 ? 'inset 4px 0 0 ' + COLORS[i % COLORS.length] : '';
+  });
   $('cards').innerHTML = DATA.callers.map(c => {
     const h = hours[c.name] || 0;
     const cls = h === c.targetHours ? 'ok' : h < c.targetHours ? 'warn' : 'bad';
